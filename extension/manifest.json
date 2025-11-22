@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "ManageBac 任务抓取助手",
+  "description": "批量抓取 ManageBac 所有班级的任务和成绩数据，并导出为 CSV 文件。",
+  "version": "0.1.0",
+  "permissions": ["storage", "tabs", "scripting", "downloads"],
+  "host_permissions": ["https://*.managebac.cn/*"],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ManageBac 任务抓取助手",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "background": {
+    "service_worker": "service_worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.managebac.cn/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
+
