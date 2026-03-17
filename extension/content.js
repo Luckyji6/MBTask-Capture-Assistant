@@ -25,6 +25,8 @@ const TASK_DUE_SELECTORS = [
   "[data-testid*=due]",
   ".assignment-due-date",
 ];
+const TASK_MONTH_SELECTORS = [".month"];
+const TASK_DAY_SELECTORS = [".day"];
 const TASK_GRADE_SELECTORS = [
   ".label.label-score",
   ".label-score",
@@ -63,11 +65,19 @@ const STATUS_ICON_SELECTORS = [
   ".status.pending",
 ];
 const TASK_SUMMARY_DEBOUNCE_MS = 500;
+const OVERLAY_ROOT_ID = "mb-batch-capture-overlay";
+const OVERLAY_STYLE_ID = "mb-batch-capture-overlay-style";
+const OVERLAY_UPDATE_INTERVAL_MS = 400;
+const BATCH_LOOP_INTERVAL_MS = 900;
 
 let debouncedTimer = null;
 let lastSignature = null;
 let taskSummaryTimer = null;
 let lastTaskSignature = null;
+let lastOverlayRenderKey = "";
+let lastOverlayRenderAt = 0;
+let batchLoopTimer = null;
+let overlayDownloadUrl = null;
 
 const safeSendMessage = (message) => {
   try {
@@ -75,6 +85,674 @@ const safeSendMessage = (message) => {
   } catch (err) {
     console.warn("无法向后台发送消息：", err);
   }
+};
+
+const ensureCaptureOverlayStyle = () => {
+  if (document.getElementById(OVERLAY_STYLE_ID)) {
+    return;
+  }
+  const style = document.createElement("style");
+  style.id = OVERLAY_STYLE_ID;
+  style.textContent = `
+    #${OVERLAY_ROOT_ID} {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2147483647;
+      font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", Arial, sans-serif;
+      pointer-events: none;
+      padding: 16px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    }
+    #${OVERLAY_ROOT_ID} .mb-overlay-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.52);
+      backdrop-filter: blur(1.5px);
+    }
+    #${OVERLAY_ROOT_ID}.mb-overlay--running,
+    #${OVERLAY_ROOT_ID}.mb-overlay--done {
+      pointer-events: auto;
+      display: flex;
+    }
+    .mb-overlay-card {
+      position: relative;
+      width: min(96vw, 780px);
+      padding: 20px;
+      border-radius: 14px;
+      border: 1px solid #d6d6dc;
+      background: #ffffff;
+      color: #111827;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.32);
+      pointer-events: auto;
+      animation: mbOverlayFadeIn 0.2s ease;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+    }
+    .mb-overlay-title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.35;
+      color: #0f766e;
+    }
+    .mb-overlay-title.done {
+      color: #166534;
+    }
+    .mb-overlay-status {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #334155;
+    }
+    .mb-overlay-progress {
+      margin: 12px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .mb-overlay-progress-text {
+      font-size: 13px;
+      color: #334155;
+    }
+    .mb-overlay-track {
+      width: 100%;
+      height: 8px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .mb-overlay-fill {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #0f766e, #15803d);
+      transition: width 0.25s ease;
+      border-radius: 999px;
+    }
+    .mb-overlay-tip {
+      margin: 8px 0 0;
+      color: #475569;
+      line-height: 1.5;
+      font-size: 13px;
+    }
+    .mb-overlay-result {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #d7e3d8;
+      background: #f7faf7;
+      color: #1f2937;
+      display: none;
+      white-space: pre-line;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .mb-overlay-class-row {
+      border: 1px solid #dbe7dc;
+      background: #ffffff;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 8px;
+    }
+    .mb-overlay-class-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #14532d;
+      margin-bottom: 8px;
+    }
+    .mb-overlay-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .mb-overlay-metric-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid #cfe3d1;
+      background: #f5fbf6;
+      border-radius: 999px;
+      padding: 3px 9px;
+      color: #1f2937;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .mb-overlay-metric-chip .v {
+      font-weight: 800;
+      color: #166534;
+    }
+    .mb-overlay-summary-line {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #334155;
+      font-weight: 600;
+    }
+    .mb-overlay-gpa-highlight {
+      margin-top: 12px;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #86efac;
+      background: #ecfdf3;
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: #14532d;
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .mb-overlay-gpa-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 56px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #166534;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    #${OVERLAY_ROOT_ID}.mb-overlay--done .mb-overlay-result {
+      display: block;
+    }
+    #${OVERLAY_ROOT_ID}.mb-overlay--done .mb-overlay-gpa-highlight {
+      display: flex;
+    }
+    .mb-overlay-download {
+      margin-top: 10px;
+      display: none;
+      color: #166534;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    #${OVERLAY_ROOT_ID}.mb-overlay--done .mb-overlay-download {
+      display: inline-block;
+    }
+    .mb-overlay-download:hover {
+      color: #15803d;
+    }
+    .mb-overlay-actions {
+      margin-top: 14px;
+      text-align: right;
+    }
+    .mb-overlay-close {
+      border: none;
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      background: #166534;
+      color: #fff;
+      display: none;
+    }
+    #${OVERLAY_ROOT_ID}.mb-overlay--done .mb-overlay-close {
+      display: inline-flex;
+    }
+    .mb-overlay-close:hover {
+      background: #15803d;
+    }
+    @keyframes mbOverlayFadeIn {
+      from {
+        transform: translateY(8px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+  `;
+  const container = document.head || document.documentElement;
+  container.appendChild(style);
+};
+
+const getCaptureOverlay = () => {
+  ensureCaptureOverlayStyle();
+  let root = document.getElementById(OVERLAY_ROOT_ID);
+  if (!root) {
+    root = document.createElement("div");
+    root.id = OVERLAY_ROOT_ID;
+    root.innerHTML = `
+      <div class="mb-overlay-backdrop"></div>
+      <div class="mb-overlay-card" role="dialog" aria-live="polite">
+        <h3 class="mb-overlay-title">抓取进行中</h3>
+        <p class="mb-overlay-status">正在连接页面，请稍等...</p>
+        <div class="mb-overlay-progress">
+          <span class="mb-overlay-progress-text">已处理 0 / 0 个班级</span>
+          <div class="mb-overlay-track">
+            <span class="mb-overlay-fill"></span>
+          </div>
+        </div>
+        <p class="mb-overlay-tip">抓取完成后会自动弹出保存提醒。</p>
+        <div class="mb-overlay-gpa-highlight">
+          <span class="mb-overlay-gpa-badge">GPA</span>
+          <span class="mb-overlay-gpa-value">-</span>
+        </div>
+        <div class="mb-overlay-result"></div>
+        <a class="mb-overlay-download" href="#" download>下载 CSV 文件</a>
+        <div class="mb-overlay-actions">
+          <button class="mb-overlay-close" type="button">我知道了</button>
+        </div>
+      </div>
+    `;
+    root.querySelector(".mb-overlay-close").addEventListener("click", () => {
+      root.style.display = "none";
+      root.classList.remove("mb-overlay--running", "mb-overlay--done");
+    });
+    document.body.appendChild(root);
+  }
+  return root;
+};
+
+const setBatchCaptureOverlay = (message = {}) => {
+  const {
+    total = 0,
+    processed = 0,
+    currentClass = "",
+    statusText = "正在抓取数据，请稍候...",
+    tipText = "抓取完成后会自动弹出保存提醒。",
+    done = false,
+    taskCount = 0,
+    gpaText = "",
+    gpaHtml = "",
+    totalGpaValue = null,
+    downloadUrl = "",
+    downloadName = "",
+  } = message;
+
+  const root = getCaptureOverlay();
+  const title = root.querySelector(".mb-overlay-title");
+  const status = root.querySelector(".mb-overlay-status");
+  const progressText = root.querySelector(".mb-overlay-progress-text");
+  const fill = root.querySelector(".mb-overlay-fill");
+  const tip = root.querySelector(".mb-overlay-tip");
+  const gpaValue = root.querySelector(".mb-overlay-gpa-value");
+  const result = root.querySelector(".mb-overlay-result");
+  const download = root.querySelector(".mb-overlay-download");
+
+  const safeTotal = Number(total) || 0;
+  const safeProcessed = Number(processed) || 0;
+  const percent = safeTotal > 0 ? Math.min(100, Math.round((safeProcessed / safeTotal) * 100)) : 0;
+  const renderKey = JSON.stringify({
+    safeTotal,
+    safeProcessed,
+    currentClass,
+    statusText,
+    tipText,
+    done: !!done,
+    percent,
+    taskCount,
+    gpaText,
+    gpaHtml,
+    totalGpaValue,
+    downloadName,
+  });
+  const now = Date.now();
+  if (
+    renderKey === lastOverlayRenderKey &&
+    now - lastOverlayRenderAt < OVERLAY_UPDATE_INTERVAL_MS
+  ) {
+    return;
+  }
+  lastOverlayRenderKey = renderKey;
+  lastOverlayRenderAt = now;
+
+  root.classList.remove("mb-overlay--running", "mb-overlay--done");
+  root.classList.add(done ? "mb-overlay--done" : "mb-overlay--running");
+  root.style.display = "flex";
+  root.style.pointerEvents = "auto";
+
+  title.textContent = done ? "抓取已完成" : "正在批量抓取任务";
+  title.classList.toggle("done", !!done);
+  status.textContent = done
+    ? `抓取完成，共处理 ${safeProcessed} 个班级。`
+    : `进度 ${safeProcessed}/${safeTotal}，${statusText}`;
+  progressText.textContent = done
+    ? `已统计任务 ${taskCount || 0} 个。`
+    : `当前班级：${currentClass || "未知"}`;
+  fill.style.width = `${percent}%`;
+  tip.textContent = tipText;
+  if (done) {
+    result.innerHTML = gpaHtml || "";
+    if (!gpaHtml) {
+      result.textContent = gpaText || "未提取到可计算的成绩数据。";
+    }
+    gpaValue.textContent = `总 GPA：${formatScore(totalGpaValue)}`;
+    if (downloadUrl) {
+      download.href = downloadUrl;
+      download.download = downloadName || "managebac_tasks.csv";
+      download.textContent = `下载 CSV：${download.download}`;
+    } else {
+      download.removeAttribute("href");
+      download.removeAttribute("download");
+      download.textContent = "CSV 生成失败，请稍后重试";
+    }
+  } else {
+    gpaValue.textContent = "-";
+    result.textContent = "";
+    download.removeAttribute("href");
+    download.removeAttribute("download");
+    download.textContent = "";
+  }
+};
+
+const showBatchCaptureRunning = (options = {}) => {
+  setBatchCaptureOverlay({
+    ...options,
+    done: false,
+    statusText: "请保持 ManageBac 标签页前台，页面会自动跳转。",
+    tipText: "抓取过程中将持续显示当前进度。",
+  });
+};
+
+const showBatchCaptureDone = (options = {}) => {
+  setBatchCaptureOverlay({
+    ...options,
+    done: true,
+    statusText: "抓取完成。",
+    tipText: "可直接点击下方链接下载 CSV，并查看 GPA 汇总。",
+  });
+};
+
+const hideBatchCaptureOverlay = () => {
+  const root = document.getElementById(OVERLAY_ROOT_ID);
+  if (!root) return;
+  root.style.display = "none";
+  root.classList.remove("mb-overlay--running", "mb-overlay--done");
+  if (overlayDownloadUrl) {
+    URL.revokeObjectURL(overlayDownloadUrl);
+    overlayDownloadUrl = null;
+  }
+  lastOverlayRenderKey = "";
+  lastOverlayRenderAt = 0;
+};
+
+const average = (list = []) => {
+  const valid = Array.isArray(list) ? list.filter((n) => Number.isFinite(n)) : [];
+  if (!valid.length) return null;
+  const sum = valid.reduce((acc, n) => acc + n, 0);
+  return sum / valid.length;
+};
+
+const extractScoreNumbers = (value) => {
+  if (value === null || value === undefined) return [];
+  const text = String(value).trim();
+  if (!text) return [];
+  const slashMatch = text.match(/^\s*(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (slashMatch) {
+    return [Number(slashMatch[1])];
+  }
+  const numbers = text.match(/-?\d+(?:\.\d+)?/g) || [];
+  return numbers.map((item) => Number(item)).filter((n) => Number.isFinite(n));
+};
+
+const formatScore = (value) => (Number.isFinite(value) ? value.toFixed(2) : "-");
+
+const computeBatchGpaSummary = (entries = []) => {
+  const classRows = entries.map((entry) => {
+    const pool = { A: [], B: [], C: [], D: [] };
+    const tasks = Array.isArray(entry?.summary?.tasks) ? entry.summary.tasks : [];
+    tasks.forEach((task) => {
+      const criteria = Array.isArray(task.criteria) ? task.criteria : [];
+      criteria.forEach((criterion) => {
+        const label = (criterion.label || "").trim();
+        const key = /^[ABCD]\b/i.test(label) ? label.charAt(0).toUpperCase() : null;
+        if (!key || !pool[key]) return;
+        const values = Array.isArray(criterion.values) ? criterion.values : [];
+        values.forEach((raw) => {
+          extractScoreNumbers(raw).forEach((n) => pool[key].push(n));
+        });
+      });
+    });
+    const A = average(pool.A);
+    const B = average(pool.B);
+    const C = average(pool.C);
+    const D = average(pool.D);
+    const subjectAverage = average([A, B, C, D]);
+    return {
+      classTitle: entry.classTitle || "(未命名班级)",
+      classHref: entry.classHref || "",
+      taskCount: Number(entry?.summary?.count) || tasks.length || 0,
+      A,
+      B,
+      C,
+      D,
+      subjectAverage,
+    };
+  });
+  const totalTaskCount = classRows.reduce((acc, row) => acc + (row.taskCount || 0), 0);
+  const totalGpa = average(classRows.map((row) => row.subjectAverage));
+  return {
+    classRows,
+    totalTaskCount,
+    totalGpa,
+  };
+};
+
+const buildOverlayGpaText = (summary) => {
+  if (!summary.classRows.length) {
+    return "未提取到可计算的成绩数据。";
+  }
+  const lines = summary.classRows.map(
+    (row) =>
+      `${row.classTitle}
+A:${formatScore(row.A)}  B:${formatScore(row.B)}  C:${formatScore(row.C)}  D:${formatScore(
+        row.D
+      )}  科目平均:${formatScore(row.subjectAverage)}  任务:${row.taskCount}`
+  );
+  lines.push(`总任务数: ${summary.totalTaskCount}`);
+  lines.push(`总 GPA: ${formatScore(summary.totalGpa)}`);
+  return lines.join("\n\n");
+};
+
+const escapeHtml = (value) =>
+  String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const buildOverlayGpaHtml = (summary) => {
+  if (!summary.classRows.length) {
+    return '<div class="mb-overlay-summary-line">未提取到可计算的成绩数据。</div>';
+  }
+  const rows = summary.classRows
+    .map((row) => {
+      return `
+        <div class="mb-overlay-class-row">
+          <div class="mb-overlay-class-title">${escapeHtml(row.classTitle)}</div>
+          <div class="mb-overlay-metrics">
+            <span class="mb-overlay-metric-chip">A <span class="v">${formatScore(row.A)}</span></span>
+            <span class="mb-overlay-metric-chip">B <span class="v">${formatScore(row.B)}</span></span>
+            <span class="mb-overlay-metric-chip">C <span class="v">${formatScore(row.C)}</span></span>
+            <span class="mb-overlay-metric-chip">D <span class="v">${formatScore(row.D)}</span></span>
+            <span class="mb-overlay-metric-chip">科目平均 <span class="v">${formatScore(
+              row.subjectAverage
+            )}</span></span>
+            <span class="mb-overlay-metric-chip">任务数 <span class="v">${row.taskCount}</span></span>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    ${rows}
+    <div class="mb-overlay-summary-line">总任务数：${summary.totalTaskCount}</div>
+  `;
+};
+
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return "";
+  const text = String(value).replace(/\r?\n/g, " ").trim();
+  if (text.includes(",") || text.includes('"')) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+};
+
+const buildBatchCsvContent = (entries, summary) => {
+  const rows = [
+    [
+      "班级",
+      "班级链接",
+      "任务序号",
+      "任务名称",
+      "截止日期",
+      "月份",
+      "日期",
+      "日期徽标",
+      "状态",
+      "任务链接",
+    ]
+      .map(csvEscape)
+      .join(","),
+  ];
+
+  entries.forEach((entry) => {
+    const tasks = Array.isArray(entry?.summary?.tasks) ? entry.summary.tasks : [];
+    if (!tasks.length) {
+      rows.push(
+        [
+          entry.classTitle || "",
+          entry.classHref || "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+        ]
+          .map(csvEscape)
+          .join(",")
+      );
+      return;
+    }
+    tasks.forEach((task, index) => {
+      rows.push(
+        [
+          entry.classTitle || "",
+          entry.classHref || "",
+          index + 1,
+          task.title || "",
+          task.due || "",
+          task.month || "",
+          task.day || "",
+          task.dueBadge || "",
+          task.status || "",
+          task.href || "",
+        ]
+          .map(csvEscape)
+          .join(",")
+      );
+    });
+  });
+
+  rows.push("");
+  rows.push(
+    [
+      "成绩汇总",
+      "班级",
+      "班级链接",
+      "任务数量",
+      "A 平均",
+      "B 平均",
+      "C 平均",
+      "D 平均",
+      "科目平均",
+    ]
+      .map(csvEscape)
+      .join(","),
+  );
+  summary.classRows.forEach((row) => {
+    rows.push(
+      [
+        row.classTitle,
+        row.classHref,
+        row.taskCount,
+        formatScore(row.A),
+        formatScore(row.B),
+        formatScore(row.C),
+        formatScore(row.D),
+        formatScore(row.subjectAverage),
+      ]
+        .map(csvEscape)
+        .join(",")
+    );
+  });
+  rows.push(
+    ["总计", "", summary.totalTaskCount, "", "", "", "", formatScore(summary.totalGpa)]
+      .map(csvEscape)
+      .join(",")
+  );
+  return rows.join("\n");
+};
+
+const buildOverlayDonePayload = (entries) => {
+  const summary = computeBatchGpaSummary(entries);
+  const gpaText = buildOverlayGpaText(summary);
+  const gpaHtml = buildOverlayGpaHtml(summary);
+  const csvContent = buildBatchCsvContent(entries, summary);
+  if (overlayDownloadUrl) {
+    URL.revokeObjectURL(overlayDownloadUrl);
+    overlayDownloadUrl = null;
+  }
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  overlayDownloadUrl = URL.createObjectURL(blob);
+  const filename = `managebac_tasks_${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+  return {
+    taskCount: summary.totalTaskCount,
+    gpaText,
+    gpaHtml,
+    totalGpaValue: summary.totalGpa,
+    downloadUrl: overlayDownloadUrl,
+    downloadName: filename,
+  };
+};
+
+const isBatchProcessing = (state = getBatchState()) =>
+  Boolean(state && state.processing);
+
+const startBatchLoop = () => {
+  if (batchLoopTimer) {
+    return;
+  }
+  batchLoopTimer = setInterval(() => {
+    maybeRunBatchAutomation();
+  }, BATCH_LOOP_INTERVAL_MS);
+};
+
+const stopBatchLoop = () => {
+  if (!batchLoopTimer) {
+    return;
+  }
+  clearInterval(batchLoopTimer);
+  batchLoopTimer = null;
+};
+
+const isOverlayMutationOnly = (mutations = []) => {
+  const root = document.getElementById(OVERLAY_ROOT_ID);
+  if (!root || !mutations.length) {
+    return false;
+  }
+  return mutations.every((mutation) => {
+    const targetInside = root.contains(mutation.target);
+    const addedInside = Array.from(mutation.addedNodes || []).every(
+      (node) => node === root || root.contains(node)
+    );
+    const removedInside = Array.from(mutation.removedNodes || []).every(
+      (node) => node === root || root.contains(node)
+    );
+    return targetInside && addedInside && removedInside;
+  });
 };
 
 const getNodeText = (node) => {
@@ -228,10 +906,15 @@ const scheduleUpdate = (reason = "observer") => {
   }, UPDATE_DEBOUNCE_MS);
 };
 
-const observer = new MutationObserver(() => {
+const observer = new MutationObserver((mutations) => {
+  if (isOverlayMutationOnly(mutations)) {
+    return;
+  }
+  if (isBatchProcessing()) {
+    return;
+  }
   scheduleUpdate("mutation");
   scheduleTaskSummary("mutation");
-  maybeRunBatchAutomation();
 });
 
 const init = () => {
@@ -243,6 +926,9 @@ const init = () => {
   scheduleTaskSummary("init");
   maybeRunPendingAutomation();
   maybeRunBatchAutomation();
+  if (isBatchProcessing()) {
+    startBatchLoop();
+  }
   setupHistoryListeners();
 };
 
@@ -341,12 +1027,19 @@ function triggerBatchAutomation() {
     currentIndex: 0,
     processing: true,
     startedAt: Date.now(),
+    results: [],
   };
   setBatchState(state);
+  startBatchLoop();
   safeSendMessage({
     type: "MB_BATCH_CLEAR",
     total: queue.length,
     startedAt: state.startedAt,
+  });
+  showBatchCaptureRunning({
+    total: queue.length,
+    processed: 0,
+    currentClass: queue[0]?.title || "",
   });
   navigateToTarget(queue[0].href);
   return {
@@ -418,15 +1111,34 @@ function maybeRunPendingAutomation() {
 function maybeRunBatchAutomation() {
   const state = getBatchState();
   if (!state || !state.processing) {
+    stopBatchLoop();
+    hideBatchCaptureOverlay();
     return;
   }
   const current = state.queue?.[state.currentIndex];
+  const total = state.queue?.length || 0;
+  const processed = Number.isInteger(state.currentIndex) ? state.currentIndex : 0;
+  showBatchCaptureRunning({
+    total,
+    processed,
+    currentClass: current?.title || "",
+  });
+
   if (!current) {
+    const existingResults = Array.isArray(state.results) ? state.results : [];
+    const donePayload =
+      existingResults.length > 0 ? buildOverlayDonePayload(existingResults) : null;
     clearBatchState();
+    stopBatchLoop();
     safeSendMessage({
       type: "MB_BATCH_DONE",
-      total: state.queue?.length || 0,
+      total: total || processed,
       reason: "empty",
+    });
+    showBatchCaptureDone({
+      total,
+      processed,
+      ...(donePayload || {}),
     });
     return;
   }
@@ -440,20 +1152,37 @@ function maybeRunBatchAutomation() {
     return;
   }
 
-  safeSendMessage({
-    type: "MB_BATCH_RESULT",
+  const currentEntry = {
     classTitle: current.title,
     classHref: current.href,
     summary,
+    timestamp: Date.now(),
+  };
+  const currentResults = Array.isArray(state.results)
+    ? [...state.results, currentEntry]
+    : [currentEntry];
+
+  safeSendMessage({
+    type: "MB_BATCH_RESULT",
+    classTitle: currentEntry.classTitle,
+    classHref: currentEntry.classHref,
+    summary: currentEntry.summary,
   });
 
   const nextIndex = state.currentIndex + 1;
   if (nextIndex >= state.queue.length) {
+    const donePayload = buildOverlayDonePayload(currentResults);
     clearBatchState();
+    stopBatchLoop();
     safeSendMessage({
       type: "MB_BATCH_DONE",
       total: state.queue.length,
       reason: "completed",
+    });
+    showBatchCaptureDone({
+      total: state.queue.length,
+      processed: state.queue.length,
+      ...donePayload,
     });
     return;
   }
@@ -462,8 +1191,14 @@ function maybeRunBatchAutomation() {
     ...state,
     currentIndex: nextIndex,
     processing: true,
+    results: currentResults,
   };
   setBatchState(nextState);
+  showBatchCaptureRunning({
+    total: state.queue.length,
+    processed: nextIndex,
+    currentClass: state.queue[nextIndex].title || "",
+  });
   navigateToTarget(state.queue[nextIndex].href);
 }
 
@@ -489,6 +1224,11 @@ function findTaskLink() {
 }
 
 function handleHistoryChange() {
+  if (isBatchProcessing()) {
+    maybeRunPendingAutomation();
+    maybeRunBatchAutomation();
+    return;
+  }
   scheduleUpdate("history");
   scheduleTaskSummary("history");
   maybeRunPendingAutomation();
@@ -586,6 +1326,9 @@ function extractTaskDetails(card, index) {
     card.textContent.trim() ||
     `任务 ${index + 1}`;
   const due = pickFirstText(card, TASK_DUE_SELECTORS);
+  const month = pickFirstText(card, TASK_MONTH_SELECTORS);
+  const day = pickFirstText(card, TASK_DAY_SELECTORS);
+  const dueBadge = [month, day].filter(Boolean).join(" ");
   const grade = pickFirstText(card, [
     ".label.label-score",
     ".label-score",
@@ -605,6 +1348,9 @@ function extractTaskDetails(card, index) {
   return {
     title,
     due,
+    month: month || null,
+    day: day || null,
+    dueBadge: dueBadge || null,
     grade: grade || null,
     points: points || null,
     status: status || null,

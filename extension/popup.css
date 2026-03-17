@@ -16,7 +16,7 @@ body {
 }
 
 .hero {
-  margin-bottom: 24px;
+  margin-bottom: 14px;
   text-align: center;
 }
 
@@ -33,47 +33,21 @@ body {
   line-height: 1.4;
 }
 
-.step {
-  background: #fff;
-  border: 1px solid #d2d2d7;
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
-.step-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.step-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #0071e3;
-  background: rgba(0, 113, 227, 0.1);
-  padding: 3px 8px;
-  border-radius: 4px;
-}
-
-.step h2 {
-  font-size: 1rem;
-  margin: 0;
-  color: #1d1d1f;
-}
-
-.step p {
+.run-status {
   font-size: 0.85rem;
-  color: #6e6e73;
+  color: #334155;
   margin: 0 0 12px;
   line-height: 1.4;
+  background: #f7f9f7;
+  border: 1px solid #d7e3d8;
+  border-radius: 8px;
+  padding: 10px 12px;
 }
 
 button {
   border: none;
   border-radius: 8px;
-  background: #0071e3;
+  background: #166534;
   color: #fff;
   padding: 10px 16px;
   cursor: pointer;
@@ -84,9 +58,9 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #0077ed;
+  background: #15803d;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.3);
+  box-shadow: 0 2px 8px rgba(21, 128, 61, 0.25);
 }
 
 button:disabled {

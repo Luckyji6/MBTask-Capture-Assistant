@@ -9,36 +9,11 @@
   <body>
     <main class="container">
       <header class="hero">
-        <h1>ManageBac 批量助手</h1>
-        <p>按照下方三个步骤操作，即可批量抓取所有班级的任务并导出 CSV。</p>
+        <h1>ManageBac 一键抓取</h1>
+        <p>自动刷新班级并开始批量抓取任务与分数。</p>
       </header>
-
-      <section class="step">
-        <div class="step-head">
-          <span class="step-label">步骤 1</span>
-          <h2>刷新班级列表</h2>
-        </div>
-        <p id="refresh-status">点击下方按钮获取当前账号的班级。</p>
-        <button id="refresh-btn" type="button">刷新班级</button>
-      </section>
-
-      <section class="step">
-        <div class="step-head">
-          <span class="step-label">步骤 2</span>
-          <h2>批量抓取任务</h2>
-        </div>
-        <p id="batch-status">完成步骤 1 后，点击按钮依次抓取每个班级。</p>
-        <button id="batch-btn" type="button">批量抓取任务</button>
-      </section>
-
-      <section class="step">
-        <div class="step-head">
-          <span class="step-label">步骤 3</span>
-          <h2>保存抓取结果</h2>
-        </div>
-        <p id="export-status">抓取结束后，可导出 CSV 保存到本地。</p>
-        <button id="export-btn" type="button">保存 CSV</button>
-      </section>
+      <p id="run-status" class="run-status">点击下方按钮开始自动抓取。</p>
+      <button id="run-btn" type="button">一键开始抓取</button>
     </main>
     <script type="module" src="popup.js"></script>
   </body>
