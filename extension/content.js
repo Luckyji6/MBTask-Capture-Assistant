@@ -27,6 +27,13 @@ const TASK_DUE_SELECTORS = [
 ];
 const TASK_MONTH_SELECTORS = [".month"];
 const TASK_DAY_SELECTORS = [".day"];
+const CSV_CRITERIA_COLUMNS = [
+  { header: "A", matches: (label) => /^A\b/i.test(label) },
+  { header: "B", matches: (label) => /^B\b/i.test(label) },
+  { header: "C", matches: (label) => /^C\b/i.test(label) },
+  { header: "D", matches: (label) => /^D\b/i.test(label) },
+  { header: "学校成绩", matches: (label) => /(学校|school)/i.test(label) },
+];
 const TASK_GRADE_SELECTORS = [
   ".label.label-score",
   ".label-score",
@@ -597,19 +604,79 @@ const csvEscape = (value) => {
   return text;
 };
 
+const formatSubmissionText = (submission) => {
+  const list = Array.isArray(submission) ? submission : [];
+  if (!list.length) {
+    return "";
+  }
+  return list
+    .map((item) => {
+      const text = (item.text || "").trim();
+      const color = item.colorClass
+        ? item.colorClass.replace("color-box-", "")
+        : item.isOverdue
+        ? "orange"
+        : item.isSubmitted
+        ? "green"
+        : "";
+      if (text && color) {
+        return `${text} (${color})`;
+      }
+      return text || color;
+    })
+    .filter(Boolean)
+    .join(" / ");
+};
+
+const getCriterionColumnValue = (criteria, column) => {
+  const list = Array.isArray(criteria) ? criteria : [];
+  for (const entry of list) {
+    const label = (entry.label || "").trim();
+    if (column.matches(label)) {
+      const values = Array.isArray(entry.values) ? entry.values : [];
+      return values.length ? values.join("/") : "";
+    }
+  }
+  return "";
+};
+
+const formatRemainingCriteria = (criteria) => {
+  const list = Array.isArray(criteria)
+    ? criteria.filter((entry) => {
+        const label = (entry.label || "").trim();
+        return !CSV_CRITERIA_COLUMNS.some((col) => col.matches(label));
+      })
+    : [];
+  if (!list.length) {
+    return "";
+  }
+  return list
+    .map((entry) => {
+      const label = entry.label || "标准";
+      const values = Array.isArray(entry.values) ? entry.values.join("/") : "";
+      return values ? `${label}: ${values}` : `${label}: -`;
+    })
+    .join(" | ");
+};
+
+const formatDueDisplay = (task) => {
+  const parts = [task.dueBadge, task.due].filter(Boolean);
+  return parts.join(" | ");
+};
+
 const buildBatchCsvContent = (entries, summary) => {
   const rows = [
     [
-      "班级",
-      "班级链接",
-      "任务序号",
       "任务名称",
-      "截止日期",
-      "月份",
-      "日期",
-      "日期徽标",
+      "班级",
+      "任务序号",
+      "日期信息",
       "状态",
+      ...CSV_CRITERIA_COLUMNS.map((col) => col.header),
+      "提交情况",
+      "其他评估细则",
       "任务链接",
+      "班级链接",
     ]
       .map(csvEscape)
       .join(","),
@@ -618,37 +685,24 @@ const buildBatchCsvContent = (entries, summary) => {
   entries.forEach((entry) => {
     const tasks = Array.isArray(entry?.summary?.tasks) ? entry.summary.tasks : [];
     if (!tasks.length) {
-      rows.push(
-        [
-          entry.classTitle || "",
-          entry.classHref || "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-        ]
-          .map(csvEscape)
-          .join(",")
-      );
       return;
     }
     tasks.forEach((task, index) => {
+      const criteriaColumns = CSV_CRITERIA_COLUMNS.map((col) =>
+        getCriterionColumnValue(task.criteria, col)
+      );
       rows.push(
         [
-          entry.classTitle || "",
-          entry.classHref || "",
-          index + 1,
           task.title || "",
-          task.due || "",
-          task.month || "",
-          task.day || "",
-          task.dueBadge || "",
+          entry.classTitle || "",
+          index + 1,
+          formatDueDisplay(task),
           task.status || "",
+          ...criteriaColumns,
+          formatSubmissionText(task.submission),
+          formatRemainingCriteria(task.criteria),
           task.href || "",
+          entry.classHref || "",
         ]
           .map(csvEscape)
           .join(",")
@@ -659,15 +713,14 @@ const buildBatchCsvContent = (entries, summary) => {
   rows.push("");
   rows.push(
     [
-      "成绩汇总",
       "班级",
-      "班级链接",
       "任务数量",
+      "科目平均",
       "A 平均",
       "B 平均",
       "C 平均",
       "D 平均",
-      "科目平均",
+      "班级链接",
     ]
       .map(csvEscape)
       .join(","),
@@ -676,20 +729,20 @@ const buildBatchCsvContent = (entries, summary) => {
     rows.push(
       [
         row.classTitle,
-        row.classHref,
         row.taskCount,
+        formatScore(row.subjectAverage),
         formatScore(row.A),
         formatScore(row.B),
         formatScore(row.C),
         formatScore(row.D),
-        formatScore(row.subjectAverage),
+        row.classHref,
       ]
         .map(csvEscape)
         .join(",")
     );
   });
   rows.push(
-    ["总计", "", summary.totalTaskCount, "", "", "", "", formatScore(summary.totalGpa)]
+    ["总计", summary.totalTaskCount, formatScore(summary.totalGpa), "", "", "", "", ""]
       .map(csvEscape)
       .join(",")
   );
@@ -1398,7 +1451,8 @@ function extractCriteriaScores(card) {
       set.querySelectorAll(".label, .cell, .criterion-grade, .label-score")
     )
       .map((el) => getNodeText(el))
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((value) => !/^(summative|formative)$/i.test(String(value).trim()));
     if (!values.length) {
       return;
     }
