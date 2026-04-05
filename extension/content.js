@@ -76,6 +76,10 @@ const OVERLAY_ROOT_ID = "mb-batch-capture-overlay";
 const OVERLAY_STYLE_ID = "mb-batch-capture-overlay-style";
 const OVERLAY_UPDATE_INTERVAL_MS = 400;
 const BATCH_LOOP_INTERVAL_MS = 900;
+const GPA_OPTIONS_KEY = "mbGpaOptions";
+const DEFAULT_GPA_OPTIONS = {
+  roundingMode: "round",
+};
 
 let debouncedTimer = null;
 let lastSignature = null;
@@ -85,6 +89,7 @@ let lastOverlayRenderKey = "";
 let lastOverlayRenderAt = 0;
 let batchLoopTimer = null;
 let overlayDownloadUrl = null;
+let currentGpaOptions = { ...DEFAULT_GPA_OPTIONS };
 
 const safeSendMessage = (message) => {
   try {
@@ -93,6 +98,35 @@ const safeSendMessage = (message) => {
     console.warn("无法向后台发送消息：", err);
   }
 };
+
+const syncGpaOptionsFromStorage = () => {
+  try {
+    chrome.storage.local.get([GPA_OPTIONS_KEY], (result) => {
+      currentGpaOptions = {
+        ...DEFAULT_GPA_OPTIONS,
+        ...(result?.[GPA_OPTIONS_KEY] || {}),
+      };
+    });
+  } catch (err) {
+    currentGpaOptions = { ...DEFAULT_GPA_OPTIONS };
+  }
+};
+
+syncGpaOptionsFromStorage();
+
+try {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[GPA_OPTIONS_KEY]) {
+      return;
+    }
+    currentGpaOptions = {
+      ...DEFAULT_GPA_OPTIONS,
+      ...(changes[GPA_OPTIONS_KEY].newValue || {}),
+    };
+  });
+} catch (err) {
+  // ignore
+}
 
 const ensureCaptureOverlayStyle = () => {
   if (document.getElementById(OVERLAY_STYLE_ID)) {
@@ -232,6 +266,19 @@ const ensureCaptureOverlayStyle = () => {
       font-weight: 800;
       color: #166534;
     }
+    .mb-overlay-metric-chip--estimate {
+      border-color: #facc15;
+      background: #fffbeb;
+      color: #92400e;
+    }
+    .mb-overlay-metric-chip--estimate .v {
+      color: #b45309;
+    }
+    .mb-overlay-metric-chip--empty {
+      border-color: #d1d5db;
+      background: #f3f4f6;
+      color: #4b5563;
+    }
     .mb-overlay-summary-line {
       margin-top: 6px;
       font-size: 13px;
@@ -369,6 +416,7 @@ const setBatchCaptureOverlay = (message = {}) => {
     gpaText = "",
     gpaHtml = "",
     totalGpaValue = null,
+    totalGpa425Value = null,
     downloadUrl = "",
     downloadName = "",
   } = message;
@@ -398,6 +446,7 @@ const setBatchCaptureOverlay = (message = {}) => {
     gpaText,
     gpaHtml,
     totalGpaValue,
+    totalGpa425Value,
     downloadName,
   });
   const now = Date.now();
@@ -430,7 +479,9 @@ const setBatchCaptureOverlay = (message = {}) => {
     if (!gpaHtml) {
       result.textContent = gpaText || "未提取到可计算的成绩数据。";
     }
-    gpaValue.textContent = `总 GPA：${formatScore(totalGpaValue)}`;
+    gpaValue.textContent = `总 GPA(7分)：${formatScore(totalGpaValue)} / 总 GPA(4.25)：${formatScore(
+      totalGpa425Value
+    )}`;
     if (downloadUrl) {
       download.href = downloadUrl;
       download.download = downloadName || "managebac_tasks.csv";
@@ -487,6 +538,42 @@ const average = (list = []) => {
   return sum / valid.length;
 };
 
+const applyRoundingMode = (value, options = currentGpaOptions) => {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return options?.roundingMode === "raw" ? value : Math.round(value);
+};
+
+const toMbSubjectLevel = (total) => {
+  if (!Number.isFinite(total)) {
+    return null;
+  }
+  if (total <= 5) return 1;
+  if (total <= 9) return 2;
+  if (total <= 14) return 3;
+  if (total <= 18) return 4;
+  if (total <= 23) return 5;
+  if (total <= 27) return 6;
+  return 7;
+};
+
+const toGpa425 = (level7) => {
+  if (!Number.isFinite(level7)) {
+    return null;
+  }
+  const table = {
+    1: 1,
+    2: 1.5,
+    3: 2,
+    4: 3,
+    5: 3.5,
+    6: 4,
+    7: 4.25,
+  };
+  return table[level7] ?? null;
+};
+
 const extractScoreNumbers = (value) => {
   if (value === null || value === undefined) return [];
   const text = String(value).trim();
@@ -500,8 +587,18 @@ const extractScoreNumbers = (value) => {
 };
 
 const formatScore = (value) => (Number.isFinite(value) ? value.toFixed(2) : "-");
+const formatIntegerScore = (value) =>
+  Number.isFinite(value) ? String(Math.round(value)) : "-";
+const formatCriterionDisplay = (value, summary) => {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  return summary?.roundingMode === "raw" ? value.toFixed(2) : String(Math.round(value));
+};
 
-const computeBatchGpaSummary = (entries = []) => {
+const CRITERION_KEYS = ["A", "B", "C", "D"];
+
+const computeBatchGpaSummary = (entries = [], options = currentGpaOptions) => {
   const classRows = entries.map((entry) => {
     const pool = { A: [], B: [], C: [], D: [] };
     const tasks = Array.isArray(entry?.summary?.tasks) ? entry.summary.tasks : [];
@@ -517,28 +614,89 @@ const computeBatchGpaSummary = (entries = []) => {
         });
       });
     });
-    const A = average(pool.A);
-    const B = average(pool.B);
-    const C = average(pool.C);
-    const D = average(pool.D);
-    const subjectAverage = average([A, B, C, D]);
+    const avgA = average(pool.A);
+    const avgB = average(pool.B);
+    const avgC = average(pool.C);
+    const avgD = average(pool.D);
+    const A = applyRoundingMode(avgA, options);
+    const B = applyRoundingMode(avgB, options);
+    const C = applyRoundingMode(avgC, options);
+    const D = applyRoundingMode(avgD, options);
+    const criterionValues = { A, B, C, D };
+    const knownCriteria = CRITERION_KEYS.filter((key) =>
+      Number.isFinite(criterionValues[key])
+    );
+    const missingCriteria = CRITERION_KEYS.filter(
+      (key) => !Number.isFinite(criterionValues[key])
+    );
+    const hasAnyScore = knownCriteria.length > 0;
+    const isComplete = hasAnyScore && missingCriteria.length === 0;
+    const rawKnownTotal = hasAnyScore
+      ? [A, B, C, D].reduce((acc, value) => acc + (Number.isFinite(value) ? value : 0), 0)
+      : null;
+    const criterionTotal = isComplete ? rawKnownTotal : null;
+    const subjectLevel7 = isComplete ? toMbSubjectLevel(criterionTotal) : null;
+    const gpa425 = isComplete ? toGpa425(subjectLevel7) : null;
+    const knownAverage = average(knownCriteria.map((key) => criterionValues[key]));
+    const estimatedCriterionTotal =
+      knownCriteria.length && missingCriteria.length
+        ? rawKnownTotal + knownAverage * missingCriteria.length
+        : criterionTotal;
+    const estimatedSubjectLevel7 =
+      knownCriteria.length && missingCriteria.length
+        ? toMbSubjectLevel(estimatedCriterionTotal)
+        : subjectLevel7;
+    const estimatedGpa425 =
+      knownCriteria.length && missingCriteria.length
+        ? toGpa425(estimatedSubjectLevel7)
+        : gpa425;
+    const isEstimated = knownCriteria.length > 0 && missingCriteria.length > 0;
     return {
       classTitle: entry.classTitle || "(未命名班级)",
       classHref: entry.classHref || "",
       taskCount: Number(entry?.summary?.count) || tasks.length || 0,
+      avgA,
+      avgB,
+      avgC,
+      avgD,
       A,
       B,
       C,
       D,
-      subjectAverage,
+      knownCriteria,
+      missingCriteria,
+      isComplete,
+      criterionTotal,
+      subjectLevel7,
+      gpa425,
+      estimatedCriterionTotal,
+      estimatedSubjectLevel7,
+      estimatedGpa425,
+      isEstimated,
+      hasAnyScore,
     };
   });
   const totalTaskCount = classRows.reduce((acc, row) => acc + (row.taskCount || 0), 0);
-  const totalGpa = average(classRows.map((row) => row.subjectAverage));
+  const totalGpa = average(classRows.filter((row) => row.isComplete).map((row) => row.subjectLevel7));
+  const totalGpa425 = average(classRows.filter((row) => row.isComplete).map((row) => row.gpa425));
+  const estimatedTotalGpa = average(
+    classRows
+      .filter((row) => row.hasAnyScore)
+      .map((row) => row.estimatedSubjectLevel7 ?? row.subjectLevel7)
+  );
+  const estimatedTotalGpa425 = average(
+    classRows.filter((row) => row.hasAnyScore).map((row) => row.estimatedGpa425 ?? row.gpa425)
+  );
+  const hasEstimatedRows = classRows.some((row) => row.isEstimated);
   return {
     classRows,
     totalTaskCount,
     totalGpa,
+    totalGpa425,
+    estimatedTotalGpa,
+    estimatedTotalGpa425,
+    hasEstimatedRows,
+    roundingMode: options?.roundingMode === "raw" ? "raw" : "round",
   };
 };
 
@@ -546,15 +704,36 @@ const buildOverlayGpaText = (summary) => {
   if (!summary.classRows.length) {
     return "未提取到可计算的成绩数据。";
   }
+  const roundingText =
+    summary.roundingMode === "raw" ? "保留平均值直接换算" : "ABCD 平均值四舍五入后换算";
   const lines = summary.classRows.map(
-    (row) =>
-      `${row.classTitle}
-A:${formatScore(row.A)}  B:${formatScore(row.B)}  C:${formatScore(row.C)}  D:${formatScore(
-        row.D
-      )}  科目平均:${formatScore(row.subjectAverage)}  任务:${row.taskCount}`
+    (row) => {
+      if (!row.hasAnyScore) {
+        return `${row.classTitle}\n暂无评分数据  任务:${row.taskCount}`;
+      }
+      const parts = row.knownCriteria.map(
+        (key) => `${key}:${formatCriterionDisplay(row[key], summary)}`
+      );
+      parts.push(`已统计:${row.knownCriteria.length}/4`);
+      if (row.isEstimated) {
+        parts.push(`预估MB总评:${formatIntegerScore(row.estimatedSubjectLevel7)}`);
+        parts.push(`预估4.25:${formatScore(row.estimatedGpa425)}`);
+      } else {
+        parts.push(`MB总评:${formatIntegerScore(row.subjectLevel7)}`);
+        parts.push(`4.25 GPA:${formatScore(row.gpa425)}`);
+      }
+      parts.push(`任务:${row.taskCount}`);
+      return `${row.classTitle}\n${parts.join("  ")}`;
+    }
   );
+  lines.push(`换算方式: ${roundingText}`);
   lines.push(`总任务数: ${summary.totalTaskCount}`);
-  lines.push(`总 GPA: ${formatScore(summary.totalGpa)}`);
+  lines.push(`总 GPA(7分): ${formatScore(summary.totalGpa)}`);
+  lines.push(`总 GPA(4.25): ${formatScore(summary.totalGpa425)}`);
+  if (summary.hasEstimatedRows) {
+    lines.push(`预估总 GPA(7分): ${formatScore(summary.estimatedTotalGpa)}`);
+    lines.push(`预估总 GPA(4.25): ${formatScore(summary.estimatedTotalGpa425)}`);
+  }
   return lines.join("\n\n");
 };
 
@@ -570,19 +749,58 @@ const buildOverlayGpaHtml = (summary) => {
   if (!summary.classRows.length) {
     return '<div class="mb-overlay-summary-line">未提取到可计算的成绩数据。</div>';
   }
+  const roundingText =
+    summary.roundingMode === "raw" ? "保留平均值直接换算" : "ABCD 平均值四舍五入后换算";
   const rows = summary.classRows
     .map((row) => {
+      if (!row.hasAnyScore) {
+        return `
+          <div class="mb-overlay-class-row">
+            <div class="mb-overlay-class-title">${escapeHtml(row.classTitle)}</div>
+            <div class="mb-overlay-metrics">
+              <span class="mb-overlay-metric-chip mb-overlay-metric-chip--empty">暂无评分数据</span>
+              <span class="mb-overlay-metric-chip">任务数 <span class="v">${row.taskCount}</span></span>
+            </div>
+          </div>
+        `;
+      }
+      const criterionChips = row.knownCriteria
+        .map(
+          (key) =>
+            `<span class="mb-overlay-metric-chip">${key} <span class="v">${formatCriterionDisplay(
+              row[key],
+              summary
+            )}</span></span>`
+        )
+        .join("");
+      const estimateChips = row.isEstimated
+        ? `
+            <span class="mb-overlay-metric-chip mb-overlay-metric-chip--estimate">已统计 <span class="v">${row.knownCriteria.length}/4</span></span>
+            <span class="mb-overlay-metric-chip mb-overlay-metric-chip--estimate">预估 MB总评 <span class="v">${formatIntegerScore(
+              row.estimatedSubjectLevel7
+            )}</span></span>
+            <span class="mb-overlay-metric-chip mb-overlay-metric-chip--estimate">预估 4.25 <span class="v">${formatScore(
+              row.estimatedGpa425
+            )}</span></span>
+          `
+        : `
+            <span class="mb-overlay-metric-chip">ABCD合计 <span class="v">${formatCriterionDisplay(
+              row.criterionTotal,
+              summary
+            )}</span></span>
+            <span class="mb-overlay-metric-chip">MB总评 <span class="v">${formatIntegerScore(
+              row.subjectLevel7
+            )}</span></span>
+            <span class="mb-overlay-metric-chip">4.25 GPA <span class="v">${formatScore(
+              row.gpa425
+            )}</span></span>
+          `;
       return `
         <div class="mb-overlay-class-row">
           <div class="mb-overlay-class-title">${escapeHtml(row.classTitle)}</div>
           <div class="mb-overlay-metrics">
-            <span class="mb-overlay-metric-chip">A <span class="v">${formatScore(row.A)}</span></span>
-            <span class="mb-overlay-metric-chip">B <span class="v">${formatScore(row.B)}</span></span>
-            <span class="mb-overlay-metric-chip">C <span class="v">${formatScore(row.C)}</span></span>
-            <span class="mb-overlay-metric-chip">D <span class="v">${formatScore(row.D)}</span></span>
-            <span class="mb-overlay-metric-chip">科目平均 <span class="v">${formatScore(
-              row.subjectAverage
-            )}</span></span>
+            ${criterionChips}
+            ${estimateChips}
             <span class="mb-overlay-metric-chip">任务数 <span class="v">${row.taskCount}</span></span>
           </div>
         </div>
@@ -591,7 +809,22 @@ const buildOverlayGpaHtml = (summary) => {
     .join("");
   return `
     ${rows}
+    <div class="mb-overlay-summary-line">换算方式：${escapeHtml(roundingText)}</div>
     <div class="mb-overlay-summary-line">总任务数：${summary.totalTaskCount}</div>
+    <div class="mb-overlay-summary-line">总 GPA(7分)：${formatScore(summary.totalGpa)}</div>
+    <div class="mb-overlay-summary-line">总 GPA(4.25)：${formatScore(summary.totalGpa425)}</div>
+    ${
+      summary.hasEstimatedRows
+        ? `<div class="mb-overlay-summary-line">预估总 GPA(7分)：${formatScore(
+            summary.estimatedTotalGpa
+          )}</div>
+           <div class="mb-overlay-summary-line">预估总 GPA(4.25)：${formatScore(
+             summary.estimatedTotalGpa425
+           )}</div>
+           <div class="mb-overlay-summary-line">预估规则：对缺失的 A/B/C/D，按已有维度平均值补齐后再换算。</div>`
+        : ""
+    }
+    <div class="mb-overlay-summary-line">说明：总 GPA 仅统计 A/B/C/D 完整的科目；缺失维度的科目只计入预估总 GPA。</div>
   `;
 };
 
@@ -715,7 +948,13 @@ const buildBatchCsvContent = (entries, summary) => {
     [
       "班级",
       "任务数量",
-      "科目平均",
+      "已统计项",
+      "ABCD 合计",
+      "MB总评(7分)",
+      "4.25 GPA",
+      "预估MB总评(7分)",
+      "预估4.25 GPA",
+      "结果类型",
       "A 平均",
       "B 平均",
       "C 平均",
@@ -730,11 +969,17 @@ const buildBatchCsvContent = (entries, summary) => {
       [
         row.classTitle,
         row.taskCount,
-        formatScore(row.subjectAverage),
-        formatScore(row.A),
-        formatScore(row.B),
-        formatScore(row.C),
-        formatScore(row.D),
+        `${row.knownCriteria.length}/4`,
+        row.isComplete ? formatCriterionDisplay(row.criterionTotal, summary) : "",
+        row.isComplete ? formatIntegerScore(row.subjectLevel7) : "",
+        row.isComplete ? formatScore(row.gpa425) : "",
+        row.isEstimated ? formatIntegerScore(row.estimatedSubjectLevel7) : "",
+        row.isEstimated ? formatScore(row.estimatedGpa425) : "",
+        row.hasAnyScore ? (row.isEstimated ? "预估" : "完整") : "无评分",
+        row.hasAnyScore ? formatCriterionDisplay(row.A, summary) : "",
+        row.hasAnyScore ? formatCriterionDisplay(row.B, summary) : "",
+        row.hasAnyScore ? formatCriterionDisplay(row.C, summary) : "",
+        row.hasAnyScore ? formatCriterionDisplay(row.D, summary) : "",
         row.classHref,
       ]
         .map(csvEscape)
@@ -742,7 +987,22 @@ const buildBatchCsvContent = (entries, summary) => {
     );
   });
   rows.push(
-    ["总计", summary.totalTaskCount, formatScore(summary.totalGpa), "", "", "", "", ""]
+    [
+      "总计",
+      summary.totalTaskCount,
+      "",
+      "",
+      formatScore(summary.totalGpa),
+      formatScore(summary.totalGpa425),
+      summary.hasEstimatedRows ? formatScore(summary.estimatedTotalGpa) : "",
+      summary.hasEstimatedRows ? formatScore(summary.estimatedTotalGpa425) : "",
+      summary.hasEstimatedRows ? "含预估" : "完整",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]
       .map(csvEscape)
       .join(",")
   );
@@ -766,6 +1026,7 @@ const buildOverlayDonePayload = (entries) => {
     gpaText,
     gpaHtml,
     totalGpaValue: summary.totalGpa,
+    totalGpa425Value: summary.totalGpa425,
     downloadUrl: overlayDownloadUrl,
     downloadName: filename,
   };
@@ -1576,4 +1837,3 @@ function scheduleTaskSummary(reason = "observer") {
 function notifyTaskSummary(reason = "manual") {
   sendTaskSummary(reason);
 }
-

@@ -12,6 +12,14 @@
         <h1>ManageBac 一键抓取</h1>
         <p>自动刷新班级并开始批量抓取任务与分数。</p>
       </header>
+      <label class="option-card" for="rounding-select">
+        <span class="option-title">ABCD 平均处理</span>
+        <span class="option-desc">决定科目总评前，A/B/C/D 平均值是否先四舍五入。</span>
+        <select id="rounding-select">
+          <option value="round">四舍五入后再换算</option>
+          <option value="raw">保留平均值直接换算</option>
+        </select>
+      </label>
       <p id="run-status" class="run-status">点击下方按钮开始自动抓取。</p>
       <button id="run-btn" type="button">一键开始抓取</button>
     </main>

@@ -33,6 +33,41 @@ body {
   line-height: 1.4;
 }
 
+.option-card {
+  display: block;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #d7e3d8;
+  border-radius: 10px;
+  background: #f7f9f7;
+}
+
+.option-title {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #14532d;
+  margin-bottom: 4px;
+}
+
+.option-desc {
+  display: block;
+  font-size: 0.78rem;
+  color: #475569;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.option-card select {
+  width: 100%;
+  border: 1px solid #cbd5d1;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 0.85rem;
+  background: #fff;
+  color: #1f2937;
+}
+
 .run-status {
   font-size: 0.85rem;
   color: #334155;

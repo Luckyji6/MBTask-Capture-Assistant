@@ -1,6 +1,8 @@
 const runBtn = document.getElementById("run-btn");
 const runStatus = document.getElementById("run-status");
+const roundingSelect = document.getElementById("rounding-select");
 const BATCH_CACHE_KEY = "mbTaskBatch";
+const GPA_OPTIONS_KEY = "mbGpaOptions";
 
 const getActiveManageBacTab = () =>
   new Promise((resolve) => {
@@ -34,6 +36,18 @@ const requestRuntime = (payload) =>
     });
   });
 
+const loadGpaOptions = () =>
+  new Promise((resolve) => {
+    chrome.storage.local.get([GPA_OPTIONS_KEY], (result) => {
+      resolve(result[GPA_OPTIONS_KEY] || { roundingMode: "round" });
+    });
+  });
+
+const saveGpaOptions = (options) =>
+  new Promise((resolve) => {
+    chrome.storage.local.set({ [GPA_OPTIONS_KEY]: options }, resolve);
+  });
+
 const ensureClassLinks = async (tabId) => {
   const cacheResp = await requestRuntime({ type: "MB_MENU_GET" });
   const cachedCount = cacheResp?.data?.links?.length || 0;
@@ -55,6 +69,9 @@ const ensureClassLinks = async (tabId) => {
 const startAutoBatch = async () => {
   runBtn.disabled = true;
   try {
+    await saveGpaOptions({
+      roundingMode: roundingSelect?.value === "raw" ? "raw" : "round",
+    });
     runStatus.textContent = "正在检查当前标签页...";
     const tab = await getActiveManageBacTab();
     if (!tab?.id) {
@@ -75,6 +92,12 @@ const startAutoBatch = async () => {
 
 runBtn.addEventListener("click", startAutoBatch);
 
+roundingSelect?.addEventListener("change", async () => {
+  await saveGpaOptions({
+    roundingMode: roundingSelect.value === "raw" ? "raw" : "round",
+  });
+});
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !changes[BATCH_CACHE_KEY]) {
     return;
@@ -90,3 +113,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   runStatus.textContent = `⏳ 抓取中：${processed}/${total}...`;
 });
+
+(async () => {
+  const options = await loadGpaOptions();
+  if (roundingSelect) {
+    roundingSelect.value = options.roundingMode === "raw" ? "raw" : "round";
+  }
+})();
