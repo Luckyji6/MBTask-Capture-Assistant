@@ -2,7 +2,7 @@
 
 > **一键抓取 ManageBac 班级任务与成绩数据，自动计算 GPA，并在网页内直接下载 CSV 汇总。**
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![License](https://img.shields.io/badge/license-GLWTPL-lightgrey.svg)
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-green.svg)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-orange.svg)
 
@@ -10,7 +10,7 @@
 
 - 🔍 **一键启动**：点击一次按钮，自动刷新班级并开始批量抓取
 - 📊 **批量任务采集**：自动遍历所有班级，收集任务与评估数据
-- 🧮 **自动 GPA 计算**：按 A/B/C/D 平均分计算科目平均，并汇总总 GPA
+- 🧮 **自动 GPA 计算**：按 A/B/C/D 评分换算 MB 7 分与 4.25 GPA，并区分正式结果与预估结果
 - 🖥️ **网页内结果展示**：抓取完成后直接在页面遮罩层查看 GPA、任务统计和下载入口
 - 💾 **CSV 汇总导出**：可直接在网页中下载成绩汇总 CSV
 - 🎯 **状态跟踪**：支持抓取进度显示与任务数量统计
@@ -44,9 +44,9 @@
 5. 获取到班级后，扩展会自动开始批量抓取任务与成绩
 6. 抓取过程中网页会自动跳转，请保持当前标签页处于可运行状态
 7. 抓取完成后，网页遮罩层会直接显示：
-   - 各班级 A / B / C / D 平均分
-   - 各班级科目平均分
-   - 总 GPA
+   - 各班级 A / B / C / D 统计值
+   - 各班级 MB 总评 / 4.25 GPA / 预估结果
+   - 正式总 GPA 与预估总 GPA
    - 统计任务数量
    - CSV 下载链接
 
@@ -57,15 +57,21 @@
 | 列名 | 说明 |
 |------|------|
 | 班级 | 班级名称 |
-| 班级链接 | 班级主页 URL |
 | 任务数量 | 该班级本次统计到的任务数 |
+| 已统计项 | 当前班级已拿到分数的 A/B/C/D 项数量 |
+| ABCD 合计 | 完整科目的 A/B/C/D 合计分 |
+| MB总评(7分) | 仅完整科目的正式 MB 总评 |
+| 4.25 GPA | 仅完整科目的正式 4.25 GPA |
+| 预估MB总评(7分) | 缺失维度时按已有维度均值补齐后的预估结果 |
+| 预估4.25 GPA | 对应预估 4.25 GPA |
+| 结果类型 | `完整`、`预估` 或 `无评分` |
 | A 平均 | 该班级 A 项评分平均值 |
 | B 平均 | 该班级 B 项评分平均值 |
 | C 平均 | 该班级 C 项评分平均值 |
 | D 平均 | 该班级 D 项评分平均值 |
-| 科目平均 | 该班级 A/B/C/D 平均后的科目成绩 |
+| 班级链接 | 班级主页 URL |
 
-CSV 末尾还会额外附带一行总计信息，用于展示总任务数与总 GPA。
+CSV 末尾还会额外附带一行总计信息，用于展示总任务数、正式总 GPA 和预估总 GPA。
 
 ## 🔒 隐私与安全
 
@@ -141,30 +147,31 @@ CSV 末尾还会额外附带一行总计信息，用于展示总任务数与总 
 
 ## 📄 开源协议
 
-本项目采用 [MIT License](LICENSE) 开源协议。
+本项目采用 [GLWTPL（Good Luck With That Public License）](LICENSE) 开源协议。
 
 ```
-MIT License
+GLWT(Good Luck With That) Public License
+Copyright (c) Everyone, except Author
 
-Copyright (c) 2025 Lucky ji
+Everyone is permitted to copy, distribute, modify, merge, sell, publish,
+sublicense or whatever they want with this software but at their OWN RISK.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Preamble
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The author has absolutely no clue what the code in this project does.
+It might just work or not, there is no third option.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+GOOD LUCK WITH THAT PUBLIC LICENSE
+TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION, AND MODIFICATION
+
+0. You just DO WHATEVER YOU WANT TO as long as you NEVER LEAVE A TRACE TO TRACK THE
+AUTHOR of the original product to blame for or hold responsible.
+
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Good luck and Godspeed.
 ```
 
 ## 🤝 贡献指南
@@ -186,4 +193,3 @@ SOFTWARE.
 ---
 
 **⚡️ 让 ManageBac 任务管理更高效！**
-

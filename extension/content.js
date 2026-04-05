@@ -231,52 +231,80 @@ const ensureCaptureOverlayStyle = () => {
       font-size: 13px;
       line-height: 1.5;
     }
-    .mb-overlay-class-row {
+    .mb-overlay-table-wrap {
+      margin-bottom: 10px;
+      overflow-x: auto;
       border: 1px solid #dbe7dc;
-      background: #ffffff;
       border-radius: 10px;
-      padding: 10px;
-      margin-bottom: 8px;
+      background: #ffffff;
     }
-    .mb-overlay-class-title {
-      font-size: 14px;
-      font-weight: 800;
+    .mb-overlay-table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .mb-overlay-table th,
+    .mb-overlay-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5ece6;
+      text-align: left;
+      vertical-align: top;
+      color: #1f2937;
+    }
+    .mb-overlay-table th {
+      position: sticky;
+      top: 0;
+      background: #f0fdf4;
       color: #14532d;
-      margin-bottom: 8px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+      z-index: 1;
     }
-    .mb-overlay-metrics {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
+    .mb-overlay-table tr:last-child td {
+      border-bottom: none;
     }
-    .mb-overlay-metric-chip {
+    .mb-overlay-table td:first-child,
+    .mb-overlay-table th:first-child {
+      min-width: 180px;
+    }
+    .mb-overlay-table-cell--class {
+      font-weight: 700;
+      color: #14532d;
+    }
+    .mb-overlay-table-cell--muted {
+      color: #64748b;
+    }
+    .mb-overlay-table-cell--empty {
+      color: #94a3b8;
+    }
+    .mb-overlay-status-pill {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      border: 1px solid #cfe3d1;
-      background: #f5fbf6;
+      justify-content: center;
+      min-width: 52px;
+      padding: 2px 8px;
       border-radius: 999px;
-      padding: 3px 9px;
-      color: #1f2937;
-      font-size: 12px;
-      font-weight: 600;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      border: 1px solid transparent;
     }
-    .mb-overlay-metric-chip .v {
-      font-weight: 800;
+    .mb-overlay-status-pill--complete {
+      background: #ecfdf3;
+      border-color: #86efac;
       color: #166534;
     }
-    .mb-overlay-metric-chip--estimate {
-      border-color: #facc15;
+    .mb-overlay-status-pill--estimate {
       background: #fffbeb;
+      border-color: #facc15;
       color: #92400e;
     }
-    .mb-overlay-metric-chip--estimate .v {
-      color: #b45309;
-    }
-    .mb-overlay-metric-chip--empty {
-      border-color: #d1d5db;
+    .mb-overlay-status-pill--empty {
       background: #f3f4f6;
+      border-color: #d1d5db;
       color: #4b5563;
     }
     .mb-overlay-summary-line {
@@ -751,64 +779,58 @@ const buildOverlayGpaHtml = (summary) => {
   }
   const roundingText =
     summary.roundingMode === "raw" ? "保留平均值直接换算" : "ABCD 平均值四舍五入后换算";
+  const renderCell = (value, className = "") =>
+    `<td class="${className}">${value === "" ? '<span class="mb-overlay-table-cell--empty">-</span>' : value}</td>`;
   const rows = summary.classRows
     .map((row) => {
-      if (!row.hasAnyScore) {
-        return `
-          <div class="mb-overlay-class-row">
-            <div class="mb-overlay-class-title">${escapeHtml(row.classTitle)}</div>
-            <div class="mb-overlay-metrics">
-              <span class="mb-overlay-metric-chip mb-overlay-metric-chip--empty">暂无评分数据</span>
-              <span class="mb-overlay-metric-chip">任务数 <span class="v">${row.taskCount}</span></span>
-            </div>
-          </div>
-        `;
-      }
-      const criterionChips = row.knownCriteria
-        .map(
-          (key) =>
-            `<span class="mb-overlay-metric-chip">${key} <span class="v">${formatCriterionDisplay(
-              row[key],
-              summary
-            )}</span></span>`
-        )
-        .join("");
-      const estimateChips = row.isEstimated
-        ? `
-            <span class="mb-overlay-metric-chip mb-overlay-metric-chip--estimate">已统计 <span class="v">${row.knownCriteria.length}/4</span></span>
-            <span class="mb-overlay-metric-chip mb-overlay-metric-chip--estimate">预估 MB总评 <span class="v">${formatIntegerScore(
-              row.estimatedSubjectLevel7
-            )}</span></span>
-            <span class="mb-overlay-metric-chip mb-overlay-metric-chip--estimate">预估 4.25 <span class="v">${formatScore(
-              row.estimatedGpa425
-            )}</span></span>
-          `
-        : `
-            <span class="mb-overlay-metric-chip">ABCD合计 <span class="v">${formatCriterionDisplay(
-              row.criterionTotal,
-              summary
-            )}</span></span>
-            <span class="mb-overlay-metric-chip">MB总评 <span class="v">${formatIntegerScore(
-              row.subjectLevel7
-            )}</span></span>
-            <span class="mb-overlay-metric-chip">4.25 GPA <span class="v">${formatScore(
-              row.gpa425
-            )}</span></span>
-          `;
+      const statusText = row.hasAnyScore ? (row.isEstimated ? "预估" : "完整") : "无评分";
+      const statusClass = row.hasAnyScore
+        ? row.isEstimated
+          ? "mb-overlay-status-pill mb-overlay-status-pill--estimate"
+          : "mb-overlay-status-pill mb-overlay-status-pill--complete"
+        : "mb-overlay-status-pill mb-overlay-status-pill--empty";
       return `
-        <div class="mb-overlay-class-row">
-          <div class="mb-overlay-class-title">${escapeHtml(row.classTitle)}</div>
-          <div class="mb-overlay-metrics">
-            ${criterionChips}
-            ${estimateChips}
-            <span class="mb-overlay-metric-chip">任务数 <span class="v">${row.taskCount}</span></span>
-          </div>
-        </div>
+        <tr>
+          ${renderCell(escapeHtml(row.classTitle), "mb-overlay-table-cell--class")}
+          ${renderCell(row.hasAnyScore ? formatCriterionDisplay(row.A, summary) : "")}
+          ${renderCell(row.hasAnyScore ? formatCriterionDisplay(row.B, summary) : "")}
+          ${renderCell(row.hasAnyScore ? formatCriterionDisplay(row.C, summary) : "")}
+          ${renderCell(row.hasAnyScore ? formatCriterionDisplay(row.D, summary) : "")}
+          ${renderCell(`${row.knownCriteria.length}/4`, "mb-overlay-table-cell--muted")}
+          ${renderCell(row.isComplete ? formatCriterionDisplay(row.criterionTotal, summary) : "")}
+          ${renderCell(row.isComplete ? formatIntegerScore(row.subjectLevel7) : "")}
+          ${renderCell(row.isComplete ? formatScore(row.gpa425) : "")}
+          ${renderCell(row.isEstimated ? formatIntegerScore(row.estimatedSubjectLevel7) : "")}
+          ${renderCell(row.isEstimated ? formatScore(row.estimatedGpa425) : "")}
+          ${renderCell(String(row.taskCount), "mb-overlay-table-cell--muted")}
+          ${renderCell(`<span class="${statusClass}">${statusText}</span>`)}
+        </tr>
       `;
     })
     .join("");
   return `
-    ${rows}
+    <div class="mb-overlay-table-wrap">
+      <table class="mb-overlay-table">
+        <thead>
+          <tr>
+            <th>班级</th>
+            <th>A</th>
+            <th>B</th>
+            <th>C</th>
+            <th>D</th>
+            <th>已统计</th>
+            <th>ABCD合计</th>
+            <th>MB总评</th>
+            <th>4.25 GPA</th>
+            <th>预估MB</th>
+            <th>预估4.25</th>
+            <th>任务数</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
     <div class="mb-overlay-summary-line">换算方式：${escapeHtml(roundingText)}</div>
     <div class="mb-overlay-summary-line">总任务数：${summary.totalTaskCount}</div>
     <div class="mb-overlay-summary-line">总 GPA(7分)：${formatScore(summary.totalGpa)}</div>
