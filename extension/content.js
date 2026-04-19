@@ -76,6 +76,10 @@ const OVERLAY_ROOT_ID = "mb-batch-capture-overlay";
 const OVERLAY_STYLE_ID = "mb-batch-capture-overlay-style";
 const OVERLAY_UPDATE_INTERVAL_MS = 400;
 const BATCH_LOOP_INTERVAL_MS = 900;
+const BATCH_CLASS_MIN_CAPTURE_MS = 1200;
+const BATCH_CLASS_STABLE_TICKS = 2;
+const BATCH_CLASS_STABILITY_WAIT_MS = 5000;
+const BATCH_EMPTY_CLASS_WAIT_MS = 12000;
 const GPA_OPTIONS_KEY = "mbGpaOptions";
 const DEFAULT_GPA_OPTIONS = {
   roundingMode: "round",
@@ -606,12 +610,52 @@ const extractScoreNumbers = (value) => {
   if (value === null || value === undefined) return [];
   const text = String(value).trim();
   if (!text) return [];
-  const slashMatch = text.match(/^\s*(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)\s*$/);
+  const slashMatch = text.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
   if (slashMatch) {
     return [Number(slashMatch[1])];
   }
-  const numbers = text.match(/-?\d+(?:\.\d+)?/g) || [];
-  return numbers.map((item) => Number(item)).filter((n) => Number.isFinite(n));
+  if (/^\s*\d+(?:\.\d+)?\s*[-~–]\s*\d+(?:\.\d+)?\s*$/.test(text)) {
+    return [];
+  }
+  const tagged = text.match(
+    /(?:score|level|grade|成绩|得分|分数)\s*[:：]?\s*(\d+(?:\.\d+)?)/i
+  );
+  if (tagged) {
+    return [Number(tagged[1])];
+  }
+  const numbers = text.match(/\d+(?:\.\d+)?/g) || [];
+  if (!numbers.length) {
+    return [];
+  }
+  const first = Number(numbers[0]);
+  return Number.isFinite(first) ? [first] : [];
+};
+
+const resolveCriterionKey = (labelValue = "") => {
+  const label = String(labelValue || "").trim();
+  if (!label) {
+    return null;
+  }
+  const upper = label.toUpperCase();
+  if (/^[ABCD](?:\b|$)/.test(upper)) {
+    return upper.charAt(0);
+  }
+  const hinted = upper.match(
+    /(?:CRITERION|CRITERIA|RUBRIC|STANDARD|SCORE|LEVEL|标准|维度|评估项|指标)\s*[:：-]?\s*([ABCD])(?:\b|$)/
+  );
+  if (hinted) {
+    return hinted[1];
+  }
+  const bracketed = upper.match(/[（(]\s*([ABCD])\s*[）)]/);
+  if (bracketed) {
+    return bracketed[1];
+  }
+  const separated = upper.match(/(?:^|[\s:：/_-])([ABCD])(?:$|[\s:：/_-])/);
+  if (separated) {
+    return separated[1];
+  }
+  const single = upper.match(/^[^A-Z]*([ABCD])[^A-Z]*$/);
+  return single ? single[1] : null;
 };
 
 const formatScore = (value) => (Number.isFinite(value) ? value.toFixed(2) : "-");
@@ -633,8 +677,7 @@ const computeBatchGpaSummary = (entries = [], options = currentGpaOptions) => {
     tasks.forEach((task) => {
       const criteria = Array.isArray(task.criteria) ? task.criteria : [];
       criteria.forEach((criterion) => {
-        const label = (criterion.label || "").trim();
-        const key = /^[ABCD]\b/i.test(label) ? label.charAt(0).toUpperCase() : null;
+        const key = resolveCriterionKey(criterion.label || "");
         if (!key || !pool[key]) return;
         const values = Array.isArray(criterion.values) ? criterion.values : [];
         values.forEach((raw) => {
@@ -1184,14 +1227,25 @@ const isClassHref = (href = "") => {
 
 const appendCoreTasksPath = (href = "") => {
   if (!href) return href;
-  let normalized = href.trim();
-  if (normalized.endsWith("/")) {
-    normalized = normalized.slice(0, -1);
+  const raw = href.trim();
+  try {
+    const parsed = new URL(raw, location.origin);
+    let pathname = parsed.pathname.replace(/\/$/, "");
+    if (!pathname.endsWith("/core_tasks")) {
+      pathname = `${pathname}/core_tasks`;
+    }
+    parsed.pathname = pathname;
+    return parsed.toString();
+  } catch (err) {
+    let normalized = raw;
+    if (normalized.endsWith("/")) {
+      normalized = normalized.slice(0, -1);
+    }
+    if (normalized.endsWith("/core_tasks")) {
+      return normalized;
+    }
+    return `${normalized}/core_tasks`;
   }
-  if (normalized.endsWith("/core_tasks")) {
-    return normalized;
-  }
-  return `${normalized}/core_tasks`;
 };
 
 const extractLinks = () => {
@@ -1364,6 +1418,9 @@ function triggerBatchAutomation() {
     processing: true,
     startedAt: Date.now(),
     results: [],
+    currentStartedAt: Date.now(),
+    lastSummarySignature: null,
+    stableSummaryTicks: 0,
   };
   setBatchState(state);
   startBatchLoop();
@@ -1402,7 +1459,9 @@ function maybeRunPendingAutomation() {
   const tryComplete = () => {
     if (isOnCoreTasksPage()) {
       const summary = buildTaskSummary();
-      if (summary.ready) {
+      const elapsed = Date.now() - Number(payload.startedAt || Date.now());
+      const shouldComplete = summary.ready && (summary.count > 0 || elapsed >= BATCH_EMPTY_CLASS_WAIT_MS);
+      if (shouldComplete) {
         notifyTaskSummary("automation");
         clearFlag();
         safeSendMessage({
@@ -1483,8 +1542,47 @@ function maybeRunBatchAutomation() {
     return;
   }
 
+  const now = Date.now();
+  const currentStartedAt = Number(state.currentStartedAt) || now;
   const summary = buildTaskSummary();
   if (!summary.ready) {
+    return;
+  }
+  const summarySignature = JSON.stringify({
+    count: summary.count || 0,
+    first: summary.tasks?.[0]?.title || "",
+    firstScore: summary.tasks?.[0]?.grade || summary.tasks?.[0]?.points || "",
+    last: summary.tasks?.[summary.tasks.length - 1]?.title || "",
+    lastScore:
+      summary.tasks?.[summary.tasks.length - 1]?.grade ||
+      summary.tasks?.[summary.tasks.length - 1]?.points ||
+      "",
+  });
+  const stableSummaryTicks =
+    summarySignature === state.lastSummarySignature
+      ? Number(state.stableSummaryTicks || 0) + 1
+      : 1;
+  const elapsed = now - currentStartedAt;
+  const hasTasks = Number(summary.count) > 0;
+  const canCaptureWithTasks =
+    hasTasks &&
+    elapsed >= BATCH_CLASS_MIN_CAPTURE_MS &&
+    (stableSummaryTicks >= BATCH_CLASS_STABLE_TICKS || elapsed >= BATCH_CLASS_STABILITY_WAIT_MS);
+  const canCaptureEmpty = !hasTasks && elapsed >= BATCH_EMPTY_CLASS_WAIT_MS;
+
+  if (!canCaptureWithTasks && !canCaptureEmpty) {
+    if (
+      state.lastSummarySignature !== summarySignature ||
+      Number(state.stableSummaryTicks || 0) !== stableSummaryTicks ||
+      !Number.isFinite(Number(state.currentStartedAt))
+    ) {
+      setBatchState({
+        ...state,
+        currentStartedAt,
+        lastSummarySignature: summarySignature,
+        stableSummaryTicks,
+      });
+    }
     return;
   }
 
@@ -1528,6 +1626,9 @@ function maybeRunBatchAutomation() {
     currentIndex: nextIndex,
     processing: true,
     results: currentResults,
+    currentStartedAt: Date.now(),
+    lastSummarySignature: null,
+    stableSummaryTicks: 0,
   };
   setBatchState(nextState);
   showBatchCaptureRunning({
@@ -1652,7 +1753,7 @@ function buildTaskSummary() {
   return {
     ready: true,
     count: cards.length,
-    tasks: cards.slice(0, 20).map(extractTaskDetails),
+    tasks: cards.map(extractTaskDetails),
   };
 }
 

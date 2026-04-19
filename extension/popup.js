@@ -49,21 +49,22 @@ const saveGpaOptions = (options) =>
   });
 
 const ensureClassLinks = async (tabId) => {
+  runStatus.textContent = "正在自动刷新班级列表...";
+  const scrapeResp = await requestRuntime({ type: "MB_MENU_REQUEST_SCRAPE", tabId });
+  const scrapedCount = scrapeResp?.links?.length || 0;
+  if (scrapeResp?.ok && scrapedCount > 0) {
+    return scrapedCount;
+  }
   const cacheResp = await requestRuntime({ type: "MB_MENU_GET" });
   const cachedCount = cacheResp?.data?.links?.length || 0;
   if (cachedCount > 0) {
+    runStatus.textContent = "实时刷新失败，已回退到缓存班级列表。";
     return cachedCount;
   }
-  runStatus.textContent = "未发现班级缓存，正在自动刷新班级列表...";
-  const scrapeResp = await requestRuntime({ type: "MB_MENU_REQUEST_SCRAPE", tabId });
   if (!scrapeResp?.ok) {
     throw new Error(scrapeResp?.error || "自动刷新班级失败");
   }
-  const count = scrapeResp?.links?.length || 0;
-  if (!count) {
-    throw new Error("未获取到班级，请确认左侧菜单已加载并已登录。");
-  }
-  return count;
+  throw new Error("未获取到班级，请确认左侧菜单已加载并已登录。");
 };
 
 const startAutoBatch = async () => {
