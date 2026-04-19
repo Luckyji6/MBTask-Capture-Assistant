@@ -1458,10 +1458,11 @@ function maybeRunPendingAutomation() {
 
   const tryComplete = () => {
     if (isOnCoreTasksPage()) {
-      const summary = buildTaskSummary();
+      const lightweight = buildTaskSummaryLightweight();
       const elapsed = Date.now() - Number(payload.startedAt || Date.now());
-      const shouldComplete = summary.ready && (summary.count > 0 || elapsed >= BATCH_EMPTY_CLASS_WAIT_MS);
+      const shouldComplete = lightweight.ready && (lightweight.count > 0 || elapsed >= BATCH_EMPTY_CLASS_WAIT_MS);
       if (shouldComplete) {
+        const summary = buildTaskSummary();
         notifyTaskSummary("automation");
         clearFlag();
         safeSendMessage({
@@ -1929,24 +1930,16 @@ function sendTaskSummary(reason = "observer") {
     lastTaskSignature = null;
     return;
   }
-  const summary = buildTaskSummary();
+  const lightweight = buildTaskSummaryLightweight();
   const signature = JSON.stringify({
-    count: summary.count,
-    first: summary.tasks[0]?.title || "",
-    grade: summary.tasks[0]?.grade || summary.tasks[0]?.points || "",
-    criteria:
-      summary.tasks[0]?.criteria
-        ?.map((c) => `${c.label || ""}:${(c.values || []).join("/")}`)
-        .join("|") || "",
-    submission:
-      summary.tasks[0]?.submission
-        ?.map((badge) => `${badge.text}:${badge.colorClass || ""}`)
-        .join("|") || "",
+    count: lightweight.count,
+    first: lightweight.firstTitle || "",
   });
   if (signature === lastTaskSignature) {
     return;
   }
   lastTaskSignature = signature;
+  const summary = buildTaskSummary();
   safeSendMessage({
     type: "MB_TASK_SUMMARY",
     summary,
