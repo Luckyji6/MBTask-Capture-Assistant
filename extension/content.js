@@ -28,10 +28,10 @@ const TASK_DUE_SELECTORS = [
 const TASK_MONTH_SELECTORS = [".month"];
 const TASK_DAY_SELECTORS = [".day"];
 const CSV_CRITERIA_COLUMNS = [
-  { header: "A", matches: (label) => /^A\b/i.test(label) },
-  { header: "B", matches: (label) => /^B\b/i.test(label) },
-  { header: "C", matches: (label) => /^C\b/i.test(label) },
-  { header: "D", matches: (label) => /^D\b/i.test(label) },
+  { header: "A", matches: (label) => resolveCriterionKey(label) === "A" },
+  { header: "B", matches: (label) => resolveCriterionKey(label) === "B" },
+  { header: "C", matches: (label) => resolveCriterionKey(label) === "C" },
+  { header: "D", matches: (label) => resolveCriterionKey(label) === "D" },
   { header: "学校成绩", matches: (label) => /(学校|school)/i.test(label) },
 ];
 const TASK_GRADE_SELECTORS = [
@@ -1544,26 +1544,21 @@ function maybeRunBatchAutomation() {
 
   const now = Date.now();
   const currentStartedAt = Number(state.currentStartedAt) || now;
-  const summary = buildTaskSummary();
-  if (!summary.ready) {
+  const lightweight = buildTaskSummaryLightweight();
+  if (!lightweight.ready) {
     return;
   }
   const summarySignature = JSON.stringify({
-    count: summary.count || 0,
-    first: summary.tasks?.[0]?.title || "",
-    firstScore: summary.tasks?.[0]?.grade || summary.tasks?.[0]?.points || "",
-    last: summary.tasks?.[summary.tasks.length - 1]?.title || "",
-    lastScore:
-      summary.tasks?.[summary.tasks.length - 1]?.grade ||
-      summary.tasks?.[summary.tasks.length - 1]?.points ||
-      "",
+    count: lightweight.count || 0,
+    first: lightweight.firstTitle || "",
+    last: lightweight.lastTitle || "",
   });
   const stableSummaryTicks =
     summarySignature === state.lastSummarySignature
       ? Number(state.stableSummaryTicks || 0) + 1
       : 1;
   const elapsed = now - currentStartedAt;
-  const hasTasks = Number(summary.count) > 0;
+  const hasTasks = Number(lightweight.count) > 0;
   const canCaptureWithTasks =
     hasTasks &&
     elapsed >= BATCH_CLASS_MIN_CAPTURE_MS &&
@@ -1585,6 +1580,8 @@ function maybeRunBatchAutomation() {
     }
     return;
   }
+
+  const summary = buildTaskSummary();
 
   const currentEntry = {
     classTitle: current.title,
@@ -1754,6 +1751,21 @@ function buildTaskSummary() {
     ready: true,
     count: cards.length,
     tasks: cards.map(extractTaskDetails),
+  };
+}
+
+function buildTaskSummaryLightweight() {
+  if (!isOnCoreTasksPage()) {
+    return { ready: false, count: 0 };
+  }
+  const cards = collectTaskCards();
+  const first = cards[0];
+  const last = cards[cards.length - 1];
+  return {
+    ready: true,
+    count: cards.length,
+    firstTitle: first ? (pickFirstText(first, TASK_TITLE_SELECTORS) || "") : "",
+    lastTitle: last ? (pickFirstText(last, TASK_TITLE_SELECTORS) || "") : "",
   };
 }
 

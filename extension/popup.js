@@ -50,13 +50,13 @@ const saveGpaOptions = (options) =>
 
 const ensureClassLinks = async (tabId) => {
   runStatus.textContent = "正在自动刷新班级列表...";
+  const cacheResp = await requestRuntime({ type: "MB_MENU_GET" });
+  const cachedCount = cacheResp?.data?.links?.length || 0;
   const scrapeResp = await requestRuntime({ type: "MB_MENU_REQUEST_SCRAPE", tabId });
   const scrapedCount = scrapeResp?.links?.length || 0;
   if (scrapeResp?.ok && scrapedCount > 0) {
     return scrapedCount;
   }
-  const cacheResp = await requestRuntime({ type: "MB_MENU_GET" });
-  const cachedCount = cacheResp?.data?.links?.length || 0;
   if (cachedCount > 0) {
     runStatus.textContent = "实时刷新失败，已回退到缓存班级列表。";
     return cachedCount;
